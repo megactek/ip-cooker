@@ -63,20 +63,8 @@ func NewWebServiceChecker(logger *logger.Logger, conf *config.Config) *WebServic
 func checkIp(ip string) []string {
 	openPorts := []string{}
 	for _, port := range PORTS {
-		if checkPort := utils.ScanPort(ip, port); checkPort == true {
-			var url string
+		if checkPort, url := utils.ScanWebService(ip, port); checkPort == true {
 
-			switch port {
-			case 443:
-				url = fmt.Sprintf("https://%s:%d", ip, port)
-				break
-			case 8443:
-				url = fmt.Sprintf("https://%s:%d", ip, port)
-				break
-			default:
-				url = fmt.Sprintf("http://%s:%d", ip, port)
-				break
-			}
 			openPorts = append(openPorts, url)
 		}
 	}

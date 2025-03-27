@@ -3,8 +3,10 @@ package utils
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -80,4 +82,34 @@ func ScanPort(ip string, port int) bool {
 	_, err := d.DialContext(ctx, "tcp", addr)
 	return err == nil
 
+}
+
+func ScanWebService(ip string, port int) (bool, string) {
+	var protocol string
+
+	// Determine likely protocol based on port
+	if port == 443 || port == 8443 {
+		protocol = "https"
+	} else {
+		protocol = "http"
+	}
+
+	url := fmt.Sprintf("%s://%s:%d", protocol, ip, port)
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // Skip certificate validation
+		},
+	}
+
+	// Try to get the root page
+	resp, err := client.Get(url)
+	if err != nil {
+		return false, ""
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK, url
 }
