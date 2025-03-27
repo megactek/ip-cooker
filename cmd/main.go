@@ -69,15 +69,14 @@ func options() string {
 
 func main() {
 	// Define a string flag for verbose to handle both -verbose and -verbose=true formats
-	verboseStr := flag.String("verbose", "false", "Enable verbose output (true/false)")
-	threadFlag := flag.Int("thread", 50, "Thread count ( <= 200)")
+	verboseStr := flag.Bool("verbose", true, "Enable verbose output (true/false)")
 
 	// Parse flags
 	flag.Parse()
 
 	// Convert verbose string to boolean
 	verbose := false
-	if *verboseStr == "true" || *verboseStr == "1" || *verboseStr == "yes" {
+	if *verboseStr == true {
 		verbose = true
 	}
 
@@ -85,7 +84,7 @@ func main() {
 	logger := logger.NewLogger(verbose)
 
 	// Create config with the processed flag values
-	conf := config.LoadConfig(verbose, *threadFlag, logger)
+	conf := config.LoadConfig(verbose, logger)
 	fmt.Println(banner())
 
 	for {

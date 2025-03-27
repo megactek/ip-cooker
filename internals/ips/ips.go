@@ -3,6 +3,7 @@ package ips
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"bytes"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/megactek/scanner_lite/internals/config"
 	"github.com/megactek/scanner_lite/internals/logger"
+	"github.com/megactek/scanner_lite/internals/utils"
 	// "time"
 	// "os"
 )
@@ -19,8 +21,6 @@ type IPService struct {
 	cidrs  []string
 	logger *logger.Logger
 	conf   *config.Config
-	lock   sync.Mutex
-	ips    map[string]struct{}
 }
 
 func NewIPService(logger *logger.Logger, conf *config.Config) (*IPService, error) {
@@ -44,8 +44,6 @@ func NewIPService(logger *logger.Logger, conf *config.Config) (*IPService, error
 		cidrs:  tempCidrs,
 		logger: logger,
 		conf:   conf,
-		lock:   sync.Mutex{},
-		ips:    make(map[string]struct{}),
 	}, nil
 }
 
@@ -79,56 +77,12 @@ func incrementIP(ip []byte) {
 	}
 }
 
-func (i *IPService) containsIp(ip string) bool {
-	_, exists := i.ips[ip]
-	return exists
-}
-
-func (i *IPService) saveIps(ips []string) {
-	// Prepare unique IPs to add (avoid duplicates before locking)
-	newIps := make([]string, 0, len(ips))
-
-	i.lock.Lock()
-	// Find only new IPs that aren't already in our list
-	for _, ip := range ips {
-		if !i.containsIp(ip) {
-			newIps = append(newIps, ip)
-			i.ips[ip] = struct{}{}
-		}
-	}
-	i.lock.Unlock()
-
-	// If no new IPs, return early
-	if len(newIps) == 0 {
-		return
-	}
-
-	// Batch write to file (outside the lock for better concurrency)
-	file, err := os.OpenFile("ips.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		i.logger.Error(fmt.Sprintf("Error opening ips.txt file: %s", err))
-		return
-	}
-	defer file.Close()
-
-	// Create a buffer for batch writing with pre-allocated capacity
-	buffer := bytes.NewBuffer(make([]byte, 0, len(newIps)*16)) // Estimate ~16 bytes per IP
-	for _, ip := range newIps {
-		buffer.WriteString(ip + "\n")
-	}
-
-	// Single write operation for all IPs
-	if _, err := file.Write(buffer.Bytes()); err != nil {
-		i.logger.Error(fmt.Sprintf("Error writing to ips.txt file: %s", err))
-	}
-}
-
-func (i *IPService) processCIDR(cidr string) {
+func (i *IPService) processCIDR(cidr string) []string {
 	i.logger.Info(fmt.Sprintf("Processing CIDR: %s", cidr))
 	ipStart, ipEnd, err := i.GetCIDRRange(cidr)
 	if err != nil {
 		i.logger.Error(fmt.Sprintf("Error getting CIDR range: %s", err))
-		return
+		return []string{}
 	}
 
 	// Pre-allocate IP list with estimated capacity
@@ -145,47 +99,45 @@ func (i *IPService) processCIDR(cidr string) {
 	for bytes.Compare(currentIP, ipEnd) <= 0 {
 		ips = append(ips, net.IP(append([]byte(nil), currentIP...)).String())
 
-		// Increment IP in place
 		incrementIP(currentIP)
 
-		// Batch save to avoid memory issues with very large CIDRs
-		if len(ips) >= 100000 {
-			i.saveIps(ips)
-			ips = ips[:0] // Clear slice but keep capacity
-		}
 	}
-
-	// Save any remaining IPs
-	if len(ips) > 0 {
-		i.saveIps(ips)
-	}
+	i.logger.Success(fmt.Sprintf("CIDR processing %s found %v ip(s)", cidr, len(ips)))
+	return ips
 }
 
 func (i *IPService) Start() {
 	i.logger.Info("Processing IPs...")
-	workerCount := i.conf.GetThread()
 
-	if workerCount <= 0 {
-		workerCount = 100
-	}
+	// Create a channel to collect results
+	results := make(chan []string, len(i.cidrs)) // Buffered channel to prevent blocking
 
-	jobs := make(chan string, len(i.cidrs))
-
+	// Process CIDRs in parallel
 	var wg sync.WaitGroup
-	for w := 0; w < workerCount; w++ {
+	for _, cidr := range i.cidrs {
 		wg.Add(1)
-		go func() {
+		go func(cidr string) {
 			defer wg.Done()
-			for cidr := range jobs {
-				i.processCIDR(cidr)
+			// Process the CIDR and send results directly to the channel
+			ipList := i.processCIDR(cidr)
+			if len(ipList) > 0 {
+				results <- ipList
 			}
-		}()
+		}(cidr)
 	}
 
-	for _, cidr := range i.cidrs {
-		jobs <- cidr
+	// Start a goroutine to close the results channel after all processing is done
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results from the channel
+	var ips []string
+	for ipList := range results {
+		ips = slices.Concat(ips, ipList)
 	}
-	close(jobs)
-	wg.Wait()
-	i.logger.Success("CIDR to IP conversion completed")
+
+	utils.SaveToFile("ips.txt", ips)
+	i.logger.Success(fmt.Sprintf("CIDR to IP conversion completed, ips found: %v", len(ips)))
 }
