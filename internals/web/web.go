@@ -163,8 +163,10 @@ func (w *WebServiceChecker) Start() {
 			recentProcessed := currentCount - lastProcessed
 			ipsPerSecond := float64(recentProcessed) / interval.Seconds()
 
-			w.logger.Info(fmt.Sprintf("Progress: %d IPs processed (%.1f IPs/sec), %d web services found",
-				currentCount, ipsPerSecond, currentFound))
+			estimatedTime := time.Duration(float64(int64(len(ipChan))-currentCount) / ipsPerSecond * float64(time.Second))
+
+			w.logger.Info(fmt.Sprintf("%d/%d IPs processed (%.1f IPs/sec), %d good, ETA: %s",
+				currentCount, len(ipChan), ipsPerSecond, currentFound, estimatedTime))
 
 			// Update last values
 			lastProcessed = currentCount
