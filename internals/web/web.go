@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 	"sync/atomic"
 
@@ -40,7 +39,9 @@ type WebServiceChecker struct {
 func NewWebServiceChecker(logger *logger.Logger, conf *config.Config) *WebServiceChecker {
 	logger.Success("Starting Web service Checker...")
 
-	cpuCount := runtime.NumCPU()
+	var threadCount int
+	fmt.Println("Enter the number of threads to use:")
+	fmt.Scan(&threadCount)
 
 	// Count IPs from file without loading everything into memory
 	ipCount, err := countLinesInFile("ips.txt")
@@ -49,18 +50,18 @@ func NewWebServiceChecker(logger *logger.Logger, conf *config.Config) *WebServic
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("Found %d IPs to scan with %d threads", ipCount, cpuCount))
+	logger.Info(fmt.Sprintf("Found %d IPs to scan with %d threads", ipCount, threadCount))
 
 	// Set GOMAXPROCS to utilize all available cores
-	runtime.GOMAXPROCS(runtime.NumCPU())
+	// runtime.GOMAXPROCS(runtime.NumCPU())
 
 	return &WebServiceChecker{
-		ips:      []string{}, // We'll read incrementally instead of loading all at once
+		ips:      []string{},
 		logger:   logger,
 		conf:     conf,
 		lock:     sync.Mutex{},
 		ip_ports: map[string]struct{}{},
-		thread:   cpuCount * 4, // Increase thread count as most time is spent waiting on network
+		thread:   threadCount,
 	}
 }
 
