@@ -3,10 +3,12 @@ package utils
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
+
+	// "crypto/tls"
 	"fmt"
 	"net"
-	"net/http"
+
+	// "net/http"
 	"os"
 	"strings"
 	"sync"
@@ -84,32 +86,32 @@ func ScanPort(ip string, port int) bool {
 
 }
 
+const (
+	dialTimeout  = 2 * time.Second
+	totalTimeout = 3 * time.Second
+	bufferSize   = 1000
+)
+
 func ScanWebService(ip string, port int) (bool, string) {
-	var protocol string
+	address := fmt.Sprintf("%s:%d", ip, port)
 
-	// Determine likely protocol based on port
-	if port == 443 || port == 8443 {
-		protocol = "https"
-	} else {
-		protocol = "http"
+	// Set up dialer with timeout
+	dialer := net.Dialer{
+		Timeout: dialTimeout,
 	}
 
-	url := fmt.Sprintf("%s://%s:%d", protocol, ip, port)
-
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 3 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // Skip certificate validation
-		},
-	}
-
-	// Try to get the root page
-	resp, err := client.Get(url)
+	conn, err := dialer.Dial("tcp", address)
 	if err != nil {
 		return false, ""
 	}
-	defer resp.Body.Close()
+	defer conn.Close()
 
-	return resp.StatusCode == http.StatusOK, url
+	// Construct URL
+	protocol := "http"
+	if port == 443 || port == 8443 {
+		protocol = "https"
+	}
+	url := fmt.Sprintf("%s://%s:%d", protocol, ip, port)
+
+	return true, url
 }
